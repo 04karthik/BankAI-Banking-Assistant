@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "BankAI Multi-Agent Banking Assistant"
+description = "The existing BankAI Streamlit application, served from the project root with its SQLite-backed agents."
+version = "1.0.0"
+id = "artifacts/bankai-dashboard"
+router = "path"
+
+[[services]]
+name = "web"
+paths = ["/"]
+localPort = 5000
+
+[services.development]
+run = "cd ../.. && streamlit run app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true"
+
+[services.production.build]
+args = ["uv", "sync", "--project", "../..", "--frozen"]
+
+[services.production.run]
+args = ["bash", "-lc", "cd ../.. && uv run --frozen streamlit run app.py --server.port 5000 --server.address 0.0.0.0 --server.headless true"]
+
+[services.production.health.startup]
+path = "/"
+
+[services.env]
+PORT = "5000"
+BASE_PATH = "/"

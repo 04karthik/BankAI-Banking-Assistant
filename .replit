@@ -18,19 +18,7 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "BankAI Streamlit App"
-
-[[workflows.workflow]]
-name = "BankAI Streamlit App"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "streamlit run app.py --server.port 5000 --server.address 0.0.0.0 --server.headless true"
-waitForPort = 5000
-
-[workflows.workflow.metadata]
-outputType = "webview"
+args = "artifacts/bankai-dashboard: web"
 
 [agent]
 stack = "PNPM_WORKSPACE"
@@ -43,6 +31,3 @@ timeoutMs = 20000
 [nix]
 channel = "stable-25_05"
 
-[[ports]]
-localPort = 5000
-externalPort = 80
