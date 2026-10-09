@@ -14,7 +14,37 @@ streamlit run app.py --server.port 5000
 ```
 
 The first launch creates `bankai.db` in the project folder and seeds three demo
-customers. No API key, cloud database, or bank connection is required.
+customers. No API key, cloud database, or bank connection is required; without an
+LLM key the app uses its deterministic mock router.
+
+## Optional live LLM intent routing
+
+The LLM is used only to interpret the question and return a structured list of
+agents and Banking Agent actions. The application validates that response before
+routing. It does not send customer IDs, balances, or transaction records to the
+provider. SQLite remains the source for account data, while fraud risk and loan
+eligibility/EMI are still calculated by deterministic Python code.
+
+Configure the key as a secret environment variable named `BANKAI_LLM_API_KEY`.
+In Replit, add it through the Secrets pane; locally, inject it through your
+environment or secret manager. Do not put the key in source code or commit it.
+Without this variable, the application stays in working `MOCK MODE`. Invalid
+model output, request timeouts, and provider errors also fall back to the mock
+router and are labeled as `MOCK MODE` in the response.
+
+| Environment variable | Purpose | Default |
+| --- | --- | --- |
+| `BANKAI_LLM_API_KEY` | Secret provider key; enables live routing | Not set |
+| `BANKAI_LLM_PROVIDER` | `openai`, `openrouter`, or `custom` | `openai` |
+| `BANKAI_LLM_MODEL` | Provider model name | `gpt-4o-mini` for OpenAI |
+| `BANKAI_LLM_BASE_URL` | OpenAI-compatible API root; required for `custom` | Provider default |
+| `BANKAI_LLM_TIMEOUT_SECONDS` | Request timeout, from 1 to 60 seconds | `10` |
+
+OpenAI and OpenRouter use their standard API roots by default. For another
+OpenAI-compatible provider, set `BANKAI_LLM_PROVIDER=custom` and configure
+`BANKAI_LLM_BASE_URL` and `BANKAI_LLM_MODEL`. HTTPS is required, except for
+localhost endpoints. Each assistant response reports whether it used live LLM
+routing or mock routing.
 
 ## Try the five use cases
 
@@ -36,8 +66,9 @@ python -m unittest discover -v
 
 ## How the demo works
 
-- **Supervisor Agent** applies deterministic intent routing and coordinates one or
-  more specialist agents.
+- **Supervisor Agent** uses validated structured LLM intent routing when configured;
+  otherwise it uses the deterministic mock router. It can coordinate multiple
+  specialist agents in one request.
 - **Banking Agent** reads account balances and transaction history from SQLite.
 - **Fraud Agent** applies a stable rule-based formula to the requested amount and
   stated transaction signals; its score is not a bank decision.

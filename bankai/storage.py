@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
@@ -63,9 +65,22 @@ def connect(db_path: str | Path = DATABASE_PATH) -> sqlite3.Connection:
     return connection
 
 
+@contextmanager
+def _managed_connection(
+    db_path: str | Path = DATABASE_PATH,
+) -> Iterator[sqlite3.Connection]:
+    """Commit or roll back a connection, then always close it."""
+    connection = connect(db_path)
+    try:
+        with connection:
+            yield connection
+    finally:
+        connection.close()
+
+
 def initialize_database(db_path: str | Path = DATABASE_PATH) -> None:
     """Create the schema and seed fictional data once."""
-    with connect(db_path) as connection:
+    with _managed_connection(db_path) as connection:
         connection.executescript(
             """
             CREATE TABLE IF NOT EXISTS customers (
@@ -158,7 +173,7 @@ def initialize_database(db_path: str | Path = DATABASE_PATH) -> None:
 def get_customer(
     customer_id: str, db_path: str | Path = DATABASE_PATH
 ) -> dict[str, Any] | None:
-    with connect(db_path) as connection:
+    with _managed_connection(db_path) as connection:
         row = connection.execute(
             "SELECT * FROM customers WHERE customer_id = ?", (customer_id,)
         ).fetchone()
@@ -168,7 +183,7 @@ def get_customer(
 def get_account(
     customer_id: str, db_path: str | Path = DATABASE_PATH
 ) -> dict[str, Any] | None:
-    with connect(db_path) as connection:
+    with _managed_connection(db_path) as connection:
         row = connection.execute(
             "SELECT * FROM accounts WHERE customer_id = ?", (customer_id,)
         ).fetchone()
@@ -179,7 +194,7 @@ def get_transactions(
     customer_id: str, limit: int = 5, db_path: str | Path = DATABASE_PATH
 ) -> list[dict[str, Any]]:
     safe_limit = max(1, min(int(limit), 50))
-    with connect(db_path) as connection:
+    with _managed_connection(db_path) as connection:
         rows = connection.execute(
             """
             SELECT transaction_id, posted_at, merchant, category, amount, location, status
@@ -194,7 +209,7 @@ def get_transactions(
 
 
 def list_customers(db_path: str | Path = DATABASE_PATH) -> list[dict[str, Any]]:
-    with connect(db_path) as connection:
+    with _managed_connection(db_path) as connection:
         rows = connection.execute(
             """
             SELECT c.customer_id, c.name, a.account_id, a.balance, a.currency

@@ -7,12 +7,20 @@ from dataclasses import dataclass
 from typing import Any
 
 from bankai import storage
+from bankai.llm import (
+    LLMError,
+    RoutingPlan,
+    classify_question,
+    load_llm_settings,
+)
 
 
 @dataclass
 class AssistantResult:
     answer: str
     trace: list[dict[str, str]]
+    mode: str
+    mode_detail: str
 
 
 def _trace(trace: list[dict[str, str]], agent: str, detail: str) -> None:
@@ -20,7 +28,10 @@ def _trace(trace: list[dict[str, str]], agent: str, detail: str) -> None:
 
 
 def banking_agent(
-    customer_id: str, message: str, db_path: str = str(storage.DATABASE_PATH)
+    customer_id: str,
+    message: str,
+    db_path: str = str(storage.DATABASE_PATH),
+    requested_actions: tuple[str, ...] | None = None,
 ) -> str:
     customer = storage.get_customer(customer_id, db_path)
     account = storage.get_account(customer_id, db_path)
@@ -28,20 +39,24 @@ def banking_agent(
         return "I couldn't find a banking profile for the selected demo customer."
 
     text = message.lower()
-    wants_transactions = any(
-        phrase in text
-        for phrase in (
-            "transaction",
-            "statement",
-            "recent activity",
-            "recent charge",
-            "last purchase",
+    if requested_actions is None:
+        wants_transactions = any(
+            phrase in text
+            for phrase in (
+                "transaction",
+                "statement",
+                "recent activity",
+                "recent charge",
+                "last purchase",
+            )
         )
-    )
-    wants_balance = any(
-        phrase in text
-        for phrase in ("balance", "account details", "account number", "checking")
-    )
+        wants_balance = any(
+            phrase in text
+            for phrase in ("balance", "account details", "account number", "checking")
+        )
+    else:
+        wants_transactions = "transactions" in requested_actions
+        wants_balance = "balance" in requested_actions
     sections: list[str] = []
     if wants_transactions:
         match = re.search(
@@ -217,11 +232,8 @@ def loan_agent(customer_id: str, message: str, db_path: str = str(storage.DATABA
     )
 
 
-def supervisor_agent(
-    customer_id: str, message: str, db_path: str = str(storage.DATABASE_PATH)
-) -> AssistantResult:
-    """Route a question to relevant agents and return an execution trace."""
-    trace: list[dict[str, str]] = []
+def _mock_routing_plan(message: str) -> RoutingPlan:
+    """Preserve the original keyword router when live LLM routing is unavailable."""
     text = message.lower()
     wants_fraud = any(
         keyword in text for keyword in ("fraud", "risk", "suspicious", "safe purchase")
@@ -245,26 +257,93 @@ def supervisor_agent(
 
     selected: list[str] = []
     if wants_banking:
-        selected.append("Banking Agent")
+        selected.append("banking")
     if wants_fraud:
-        selected.append("Fraud Agent")
+        selected.append("fraud")
     if wants_loan:
-        selected.append("Loan Agent")
+        selected.append("loan")
 
+    banking_actions: list[str] = []
+    if wants_banking:
+        wants_transactions = any(
+            phrase in text
+            for phrase in (
+                "transaction",
+                "statement",
+                "recent activity",
+                "recent charge",
+                "last purchase",
+            )
+        )
+        wants_balance = any(
+            phrase in text for phrase in ("balance", "account details", "account number", "checking")
+        )
+        if wants_transactions:
+            banking_actions.append("transactions")
+        if wants_balance or not wants_transactions:
+            banking_actions.append("balance")
+    return RoutingPlan(tuple(selected), tuple(banking_actions))
+
+
+def supervisor_agent(
+    customer_id: str, message: str, db_path: str = str(storage.DATABASE_PATH)
+) -> AssistantResult:
+    """Route a question using a validated LLM plan or the original mock router."""
+    trace: list[dict[str, str]] = []
+    settings = load_llm_settings()
+    mode = "MOCK MODE"
+    if settings.ready:
+        try:
+            plan = classify_question(message, settings)
+            mode = "LIVE LLM MODE"
+            mode_detail = (
+                f"The {settings.provider} intent plan passed validation; "
+                "balances and specialist calculations stayed local."
+            )
+        except LLMError as error:
+            plan = _mock_routing_plan(message)
+            mode_detail = f"LLM routing fallback: {error}"
+    else:
+        plan = _mock_routing_plan(message)
+        if settings.has_api_key and settings.config_error:
+            mode_detail = (
+                f"LLM configuration issue: {settings.config_error} "
+                "Deterministic routing was used."
+            )
+        else:
+            mode_detail = (
+                "No API key configured; deterministic keyword routing was used."
+            )
+
+    agent_labels = {
+        "banking": "Banking Agent",
+        "fraud": "Fraud Agent",
+        "loan": "Loan Agent",
+    }
+    selected = [agent_labels[agent] for agent in plan.agents]
     _trace(
         trace,
         "Supervisor Agent",
-        f"Classified the request and routed to {', '.join(selected)}."
+        f"{mode}: {mode_detail} "
+        f"Routed to {', '.join(selected)}."
         if selected
-        else "No specialist matched; returned the supported demo capabilities.",
+        else f"{mode}: {mode_detail} No specialist matched; returned the supported demo capabilities.",
     )
 
     responses: list[str] = []
-    for agent_name in selected:
-        if agent_name == "Banking Agent":
-            responses.append(banking_agent(customer_id, message, db_path))
+    for agent_id in plan.agents:
+        agent_name = agent_labels[agent_id]
+        if agent_id == "banking":
+            responses.append(
+                banking_agent(
+                    customer_id,
+                    message,
+                    db_path,
+                    requested_actions=plan.banking_actions,
+                )
+            )
             _trace(trace, agent_name, "Read account and/or transaction data from SQLite.")
-        elif agent_name == "Fraud Agent":
+        elif agent_id == "fraud":
             result, risk_score, category = fraud_agent(message)
             responses.append(result)
             _trace(
@@ -272,7 +351,7 @@ def supervisor_agent(
                 agent_name,
                 f"Computed a deterministic simulated risk score ({category}, {risk_score}/100).",
             )
-        elif agent_name == "Loan Agent":
+        elif agent_id == "loan":
             responses.append(loan_agent(customer_id, message, db_path))
             _trace(trace, agent_name, "Checked the simulated customer profile and calculated EMI.")
 
@@ -282,4 +361,9 @@ def supervisor_agent(
             "risk, and loan eligibility with an estimated EMI. Try one of the example requests."
         )
     _trace(trace, "Supervisor Agent", f"Combined {len(responses)} specialist result(s).")
-    return AssistantResult(answer="\n\n---\n\n".join(responses), trace=trace)
+    return AssistantResult(
+        answer="\n\n---\n\n".join(responses),
+        trace=trace,
+        mode=mode,
+        mode_detail=mode_detail,
+    )

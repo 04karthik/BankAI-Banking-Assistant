@@ -6,6 +6,7 @@ import streamlit as st
 
 from bankai import storage
 from bankai.agents import AssistantResult, supervisor_agent
+from bankai.llm import load_llm_settings
 
 
 st.set_page_config(
@@ -15,6 +16,7 @@ st.set_page_config(
 )
 
 storage.initialize_database()
+llm_settings = load_llm_settings()
 customers = storage.list_customers()
 customer_options = {
     f"{customer['name']} · {customer['customer_id']}": customer["customer_id"]
@@ -22,13 +24,28 @@ customer_options = {
 }
 
 st.title("BankAI")
-st.caption("Multi-Agent Banking Assistant · Fictional data · Deterministic demo mode")
+st.caption(
+    "Multi-Agent Banking Assistant · Fictional data · Simulated banking decisions"
+)
 
 with st.sidebar:
     st.subheader("Demo workspace")
     selected_label = st.selectbox("Customer profile", list(customer_options))
     selected_customer_id = customer_options[selected_label]
-    st.info("Offline mock mode is active. No API key or real bank connection is used.")
+    if llm_settings.ready:
+        st.success(
+            f"LIVE LLM MODE available · {llm_settings.provider} intent routing. "
+            "Banking data and calculations stay local."
+        )
+    elif llm_settings.has_api_key and llm_settings.config_error:
+        st.warning(
+            f"MOCK MODE · Live LLM configuration issue: {llm_settings.config_error}"
+        )
+    else:
+        st.info(
+            "MOCK MODE · No LLM API key is configured. "
+            "Deterministic intent routing remains available."
+        )
     st.divider()
     st.markdown("**Available agents**")
     st.markdown("- Supervisor Agent")
@@ -79,6 +96,8 @@ def run_prompt(prompt: str) -> None:
                 "role": "assistant",
                 "content": result.answer,
                 "trace": result.trace,
+                "mode": result.mode,
+                "mode_detail": result.mode_detail,
             },
         ]
     )
@@ -92,6 +111,11 @@ for column, (label, prompt) in zip(use_case_columns, demo_use_cases):
 st.divider()
 for index, message in enumerate(st.session_state.get("messages", [])):
     with st.chat_message(message["role"]):
+        if message["role"] == "assistant":
+            st.caption(
+                f"Response mode: {message.get('mode', 'MOCK MODE')} · "
+                f"{message.get('mode_detail', 'Deterministic routing was used.')}"
+            )
         st.markdown(message["content"])
         if message["role"] == "assistant" and message.get("trace"):
             with st.expander("Agent execution trace", expanded=False):

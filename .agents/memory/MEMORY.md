@@ -1,1 +1,2 @@
 - [Standalone Streamlit preview routing](streamlit-preview-routing.md) — an open workflow port does not prove the app-router root preview is reachable.
+- [BankAI LLM boundary](bankai-llm-boundary.md) — use live models only to validate intent and agent routing; SQLite and Python remain authoritative for data and calculations.
