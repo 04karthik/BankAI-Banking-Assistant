@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from bankai import storage
 from bankai.agents import (
@@ -11,15 +12,27 @@ from bankai.agents import (
     loan_agent,
     supervisor_agent,
 )
+from bankai.llm import LLMSettings
 
 
 class BankAIAgentTests(unittest.TestCase):
     def setUp(self) -> None:
+        self.settings_patcher = patch(
+            "bankai.agents.load_llm_settings",
+            return_value=LLMSettings(
+                provider="openai",
+                base_url="https://api.openai.com/v1",
+                model="gpt-4o-mini",
+                api_key=None,
+            ),
+        )
+        self.settings_patcher.start()
         self.temp_dir = tempfile.TemporaryDirectory()
         self.db_path = str(Path(self.temp_dir.name) / "test-bankai.sqlite3")
         storage.initialize_database(self.db_path)
 
     def tearDown(self) -> None:
+        self.settings_patcher.stop()
         self.temp_dir.cleanup()
 
     def test_database_is_seeded_and_idempotent(self) -> None:

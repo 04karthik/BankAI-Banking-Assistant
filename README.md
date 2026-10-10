@@ -26,8 +26,11 @@ provider. SQLite remains the source for account data, while fraud risk and loan
 eligibility/EMI are still calculated by deterministic Python code.
 
 Configure the key as a secret environment variable named `BANKAI_LLM_API_KEY`.
-In Replit, add it through the Secrets pane; locally, inject it through your
-environment or secret manager. Do not put the key in source code or commit it.
+In Replit, add it through the Secrets pane; set the non-secret provider options
+as environment variables. Locally, inject the key through your environment or
+secret manager. Do not put the key in source code or commit it. Restart the Run
+workflow after changing or replacing the key so the app process reads the new
+value.
 Without this variable, the application stays in working `MOCK MODE`. Invalid
 model output, request timeouts, and provider errors also fall back to the mock
 router and are labeled as `MOCK MODE` in the response.
@@ -46,6 +49,26 @@ OpenAI-compatible provider, set `BANKAI_LLM_PROVIDER=custom` and configure
 localhost endpoints. Each assistant response reports whether it used live LLM
 routing or mock routing.
 
+### Gemini on Replit
+
+Keep the API key in `BANKAI_LLM_API_KEY` and configure these non-secret values:
+
+```text
+BANKAI_LLM_PROVIDER=custom
+BANKAI_LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
+BANKAI_LLM_MODEL=gemini-3.8-flash
+BANKAI_LLM_TIMEOUT_SECONDS=10
+```
+
+The app sends a Bearer-authenticated OpenAI-compatible `chat/completions`
+request with JSON response formatting. For Gemini, it sets low reasoning and a
+1024-token output cap so the model can return the validated route. Gemini's
+current response for this project reports that
+`gemini-2.5-flash` is unavailable to new users and recommends `gemini-3.8-flash`.
+Use a Gemini model ID enabled for the API key. If authentication fails, the UI
+shows a safe 401 message without exposing the key and continues with mock mode;
+429 responses identify rate/quota limits and also fall back to mock routing.
+
 ## Try the five use cases
 
 1. Ask: “What's my current account balance?”
@@ -63,6 +86,18 @@ execution trace records the supervisor and each specialist that actually ran.
 ```bash
 python -m unittest discover -v
 ```
+
+These automated tests are offline: they use fake provider responses and cover
+intent routing, multi-agent execution, SQLite-backed balances/transactions,
+deterministic fraud and loan calculations, and fallback for invalid output,
+timeouts, authentication errors, unavailable models, and rate limits. They do
+not verify access to a live Gemini account; live verification requires using the
+configured Replit workflow and a real request.
+
+For this workspace, the latest verification passed 16 automated tests and 6
+separate live Gemini checks: one minimal route plus balance, recent transactions,
+fraud risk, loan eligibility/EMI, and a multi-agent request. The live checks are
+not part of `unittest` and should be repeated after changing the key or model.
 
 ## How the demo works
 

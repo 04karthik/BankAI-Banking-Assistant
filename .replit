@@ -31,3 +31,10 @@ timeoutMs = 20000
 [nix]
 channel = "stable-25_05"
 
+[userenv]
+
+[userenv.shared]
+BANKAI_LLM_PROVIDER = "custom"
+BANKAI_LLM_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+BANKAI_LLM_MODEL = "gemini-3.8-flash"
+

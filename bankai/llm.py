@@ -181,6 +181,10 @@ def _request_completion(message: str, settings: LLMSettings) -> str:
             {"role": "user", "content": message},
         ],
     }
+    if urlsplit(settings.base_url).hostname == "generativelanguage.googleapis.com":
+        request_body["max_tokens"] = 1024
+        request_body["reasoning_effort"] = "low"
+
     request = Request(
         f"{settings.base_url}/chat/completions",
         data=json.dumps(request_body).encode("utf-8"),
@@ -195,7 +199,7 @@ def _request_completion(message: str, settings: LLMSettings) -> str:
         with urlopen(request, timeout=settings.timeout_seconds) as response:
             body = response.read(_MAX_RESPONSE_BYTES + 1)
     except HTTPError as error:
-        raise LLMError(f"The LLM provider returned HTTP {error.code}.") from None
+        raise LLMError(_http_error_message(error.code, settings.base_url)) from None
     except (TimeoutError, socket.timeout):
         raise LLMError("The LLM request timed out.") from None
     except URLError as error:
@@ -215,6 +219,37 @@ def _request_completion(message: str, settings: LLMSettings) -> str:
     if not isinstance(content, str):
         raise LLMError("The LLM provider returned an invalid response.")
     return content
+
+
+def _http_error_message(status_code: int, base_url: str) -> str:
+    """Return actionable provider errors without echoing response bodies or keys."""
+    hostname = urlsplit(base_url).hostname
+    provider = "Gemini" if hostname == "generativelanguage.googleapis.com" else "LLM provider"
+    if status_code == 401:
+        return (
+            f"{provider} rejected API-key authentication (HTTP 401). "
+            "Verify BANKAI_LLM_API_KEY and restart the workflow after rotating it."
+        )
+    if status_code == 403:
+        return (
+            f"{provider} denied access (HTTP 403). Check API access and key restrictions."
+        )
+    if status_code == 404:
+        return (
+            f"{provider} could not find the configured model or endpoint (HTTP 404). "
+            "Check BANKAI_LLM_MODEL and BANKAI_LLM_BASE_URL."
+        )
+    if status_code == 429:
+        return (
+            f"{provider} rate limit or quota was reached (HTTP 429). "
+            "Retry later; deterministic mock routing is available."
+        )
+    if status_code >= 500:
+        return (
+            f"{provider} is temporarily unavailable (HTTP {status_code}). "
+            "Retry later; deterministic mock routing is available."
+        )
+    return f"The LLM provider returned HTTP {status_code}."
 
 
 def classify_question(message: str, settings: LLMSettings) -> RoutingPlan:
