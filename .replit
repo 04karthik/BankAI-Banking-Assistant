@@ -37,4 +37,5 @@ channel = "stable-25_05"
 BANKAI_LLM_PROVIDER = "custom"
 BANKAI_LLM_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 BANKAI_LLM_MODEL = "gemini-3.8-flash"
+BANKAI_LLM_TIMEOUT_SECONDS = "30"
 
