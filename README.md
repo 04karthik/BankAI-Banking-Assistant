@@ -14,8 +14,9 @@ streamlit run app.py --server.port 5000
 ```
 
 The first launch creates `bankai.db` in the project folder and seeds three demo
-customers. No API key, cloud database, or bank connection is required; without an
-LLM key the app uses its deterministic mock router.
+customers. With no cloud API key configured, BankAI uses the local Ollama model
+for intent routing. If Ollama is unavailable or returns an error, the app uses
+its deterministic mock router. No cloud database or bank connection is required.
 
 ### Windows setup (PowerShell)
 
@@ -29,33 +30,30 @@ py -3 -m venv .venv
 .\.venv\Scripts\streamlit.exe run app.py --server.port 5000
 ```
 
-### Optional local Ollama on Windows
+### Local Ollama on Windows
 
-Install Ollama for Windows, then open PowerShell in the project folder and
-download a local model:
+If Ollama is not installed, install it first. Then open PowerShell in the
+project folder and download the local model:
 
 ```powershell
 winget install --id Ollama.Ollama -e
-ollama pull llama3.2
+ollama pull llama3.2:latest
+ollama list
 ```
 
-Start the Ollama application if it is not already running. Then select its local
-OpenAI-compatible endpoint and launch BankAI:
+Start the Ollama application if it is not already running, then launch BankAI.
+No provider variables or API key are needed for the local default:
 
 ```powershell
-$env:BANKAI_LLM_PROVIDER = "ollama"
-$env:BANKAI_LLM_BASE_URL = "http://localhost:11434/v1"
-$env:BANKAI_LLM_MODEL = "llama3.2"
 .\.venv\Scripts\streamlit.exe run app.py --server.port 5000
 ```
 
-Ollama defaults to `http://localhost:11434/v1` and does not need an API key. The
-application accepts the keyless Ollama provider only when its endpoint is a
-loopback address. Ollama uses a 60-second default timeout for local model
-startup. If Ollama is unavailable, returns invalid output, or its route conflicts
-with clear supported keywords, BankAI continues using deterministic local
-routing. The environment variables above apply to the current PowerShell window
-only.
+Ollama uses `http://localhost:11434/v1` and model `llama3.2` by default. It does
+not need an API key; BankAI sends requests only to a loopback address for this
+provider and does not send an Authorization header. Ollama uses a 60-second
+default timeout for local model startup. If cloud API keys are present and you
+want to force local routing, set `$env:BANKAI_LLM_PROVIDER = "ollama"` in that
+PowerShell window before launching the app.
 
 ## Optional live LLM intent routing
 
@@ -65,20 +63,20 @@ routing. It does not send customer IDs, balances, or transaction records to the
 provider. SQLite remains the source for account data, while fraud risk and loan
 eligibility/EMI are still calculated by deterministic Python code.
 
-Configure the key as a secret environment variable named `BANKAI_LLM_API_KEY`.
-In Replit, add it through the Secrets pane; set the non-secret provider options
-as environment variables. Locally, inject the key through your environment or
-secret manager. Do not put the key in source code or commit it. Restart the Run
-workflow after changing or replacing the key so the app process reads the new
-value.
-Without this variable, the application stays in working `MOCK MODE`. Invalid
-model output, request timeouts, and provider errors also fall back to the mock
-router and are labeled as `MOCK MODE` in the response.
+For cloud providers, configure the key as a secret environment variable named
+`BANKAI_LLM_API_KEY`. In Replit, add it through the Secrets pane; set the
+non-secret provider options as environment variables. Locally, inject the key
+through your environment or secret manager. Do not put the key in source code or
+commit it. Without cloud API keys, the application uses local Ollama by default.
+Invalid model output, request timeouts, and provider errors fall back to the
+deterministic router and are labeled as `MOCK MODE` in the response. Restart the
+Run workflow after changing or replacing a cloud key so the app process reads
+the new value.
 
 | Environment variable | Purpose | Default |
 | --- | --- | --- |
 | `BANKAI_LLM_API_KEY` | Secret provider key; required for remote providers | Not set; not required for local Ollama |
-| `BANKAI_LLM_PROVIDER` | `openai`, `openrouter`, `groq`, `custom`, or `ollama` | `openai` |
+| `BANKAI_LLM_PROVIDER` | `openai`, `openrouter`, `groq`, `custom`, or `ollama` | `ollama` when no cloud key is configured |
 | `BANKAI_LLM_MODEL` | Provider model name | Provider default (`llama3.2` for Ollama) |
 | `BANKAI_LLM_BASE_URL` | OpenAI-compatible API root; required for `custom` | Provider default (`http://localhost:11434/v1` for Ollama) |
 | `BANKAI_LLM_TIMEOUT_SECONDS` | Request timeout, from 1 to 60 seconds | `10` (`60` for Ollama) |

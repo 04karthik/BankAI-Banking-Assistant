@@ -299,10 +299,29 @@ class LLMRoutingTests(unittest.TestCase):
         self.assertFalse(remote_settings.ready)
         self.assertIn("localhost endpoint", remote_settings.config_error)
 
+    def test_no_cloud_key_defaults_to_ollama_and_openai_key_keeps_remote_provider(self) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            local_settings = load_llm_settings()
+
+        self.assertEqual(local_settings.provider, "ollama")
+        self.assertEqual(local_settings.base_url, "http://localhost:11434/v1")
+        self.assertEqual(local_settings.model, "llama3.2")
+        self.assertIsNone(local_settings.api_key)
+        self.assertTrue(local_settings.ready)
+
+        with patch.dict(
+            "os.environ", {"OPENAI_API_KEY": "openai-test-key"}, clear=True
+        ):
+            remote_settings = load_llm_settings()
+
+        self.assertEqual(remote_settings.provider, "openai")
+        self.assertEqual(remote_settings.api_key, "openai-test-key")
+        self.assertTrue(remote_settings.ready)
+
     def test_ollama_request_omits_authentication_header(self) -> None:
         with patch.dict(
             "os.environ",
-            {"BANKAI_LLM_PROVIDER": "ollama"},
+            {},
             clear=True,
         ):
             settings = load_llm_settings()
@@ -316,8 +335,10 @@ class LLMRoutingTests(unittest.TestCase):
             plan = classify_question("Check my balance.", settings)
 
         request = open_url.call_args.args[0]
+        request_body = json.loads(request.data)
         self.assertEqual(plan.agents, ("banking",))
         self.assertEqual(request.full_url, "http://localhost:11434/v1/chat/completions")
+        self.assertEqual(request_body["model"], "llama3.2")
         self.assertIsNone(request.get_header("Authorization"))
 
     def test_ollama_unavailable_falls_back_to_mock_router(self) -> None:

@@ -136,8 +136,10 @@ def load_llm_settings() -> LLMSettings:
         provider = "openrouter"
     elif groq_key:
         provider = "groq"
-    else:
+    elif openai_key or bankai_key:
         provider = "openai"
+    else:
+        provider = "ollama"
 
     api_key = None if provider == "ollama" else (
         bankai_key
