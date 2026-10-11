@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any
 
 from bankai import storage
 from bankai.llm import (
@@ -191,6 +190,9 @@ def loan_agent(customer_id: str, message: str, db_path: str = str(storage.DATABA
         return "I couldn't find a loan profile for the selected demo customer."
 
     requested_amount = _amount_for_intent(message, "loan", 20000.0)
+    if requested_amount <= 0:
+        return "Please specify a valid positive loan amount to calculate EMI and eligibility."
+
     term_match = re.search(r"\b(\d{1,3})\s*(?:months?|mos?)\b", message, flags=re.IGNORECASE)
     months = int(term_match.group(1)) if term_match else 36
     if months < 1 or months > 120:
@@ -232,8 +234,8 @@ def loan_agent(customer_id: str, message: str, db_path: str = str(storage.DATABA
     )
 
 
-def _mock_routing_plan(message: str) -> RoutingPlan:
-    """Preserve the original keyword router when live LLM routing is unavailable."""
+def _explicit_routing_plan(message: str) -> RoutingPlan:
+    """Resolve clear user-stated tasks without inferring extra agent actions."""
     text = message.lower()
     wants_fraud = any(
         keyword in text for keyword in ("fraud", "risk", "suspicious", "safe purchase")
@@ -242,18 +244,40 @@ def _mock_routing_plan(message: str) -> RoutingPlan:
         keyword in text
         for keyword in ("loan", "borrow", "emi", "eligibility", "eligible", "installment")
     )
-    wants_banking = any(
-        keyword in text
-        for keyword in (
-            "balance",
-            "account",
+    wants_balance = any(
+        phrase in text
+        for phrase in ("balance", "account details", "account number", "checking")
+    )
+    has_history_intent = any(
+        phrase in text
+        for phrase in (
             "transaction history",
-            "recent transaction",
-            "recent activity",
+            "history of transactions",
+            "payment history",
+            "purchase history",
             "statement",
-            "last purchase",
+        )
+    ) or bool(
+        re.search(
+            r"\b(?:show|list|display|view|what|which)\b.{0,50}\b(?:transactions|payments|charges|purchases|activity)\b",
+            text,
         )
     )
+    has_temporal_transaction = bool(
+        re.search(
+            r"\b(?:recent|latest|last)\s+(?:transactions?|payments?|charges?|purchases?)\b",
+            text,
+        )
+    )
+    wants_transactions = has_history_intent or (
+        not wants_fraud
+        and (
+            has_temporal_transaction
+            or "recent activity" in text
+            or "recent charge" in text
+        )
+    )
+    wants_banking = wants_balance or wants_transactions
 
     selected: list[str] = []
     if wants_banking:
@@ -265,24 +289,20 @@ def _mock_routing_plan(message: str) -> RoutingPlan:
 
     banking_actions: list[str] = []
     if wants_banking:
-        wants_transactions = any(
-            phrase in text
-            for phrase in (
-                "transaction",
-                "statement",
-                "recent activity",
-                "recent charge",
-                "last purchase",
-            )
-        )
-        wants_balance = any(
-            phrase in text for phrase in ("balance", "account details", "account number", "checking")
-        )
         if wants_transactions:
             banking_actions.append("transactions")
-        if wants_balance or not wants_transactions:
+        if wants_balance:
+            banking_actions.append("balance")
+        if not banking_actions:
             banking_actions.append("balance")
     return RoutingPlan(tuple(selected), tuple(banking_actions))
+
+
+def _is_ambiguous_transaction_prompt(message: str) -> bool:
+    """Avoid running tools when a transaction is named without a requested task."""
+    return bool(
+        re.search(r"\b(?:transactions?|purchases?|payments?|charges?)\b", message, re.I)
+    )
 
 
 def supervisor_agent(
@@ -291,20 +311,36 @@ def supervisor_agent(
     """Route a question using a validated LLM plan or the original mock router."""
     trace: list[dict[str, str]] = []
     settings = load_llm_settings()
+    explicit_plan = _explicit_routing_plan(message)
     mode = "MOCK MODE"
     if settings.ready:
         try:
-            plan = classify_question(message, settings)
+            llm_plan = classify_question(message, settings)
             mode = "LIVE LLM MODE"
-            mode_detail = (
-                f"The {settings.provider} intent plan passed validation; "
-                "balances and specialist calculations stayed local."
-            )
+            if explicit_plan.agents:
+                plan = explicit_plan
+                mode_detail = (
+                    "The provider response passed validation; explicit user "
+                    "intents determined agent routing and all specialist tools "
+                    "remained local."
+                )
+            elif _is_ambiguous_transaction_prompt(message):
+                plan = RoutingPlan((), ())
+                mode_detail = (
+                    "The request mentions a transaction but does not specify a "
+                    "supported task; no specialist was run."
+                )
+            else:
+                plan = llm_plan
+                mode_detail = (
+                    f"The {settings.provider} intent plan passed validation; "
+                    "balances and specialist calculations stayed local."
+                )
         except LLMError as error:
-            plan = _mock_routing_plan(message)
+            plan = explicit_plan
             mode_detail = f"LLM routing fallback: {error}"
     else:
-        plan = _mock_routing_plan(message)
+        plan = explicit_plan
         if settings.has_api_key and settings.config_error:
             mode_detail = (
                 f"LLM configuration issue: {settings.config_error} "
@@ -330,39 +366,51 @@ def supervisor_agent(
         else f"{mode}: {mode_detail} No specialist matched; returned the supported demo capabilities.",
     )
 
-    responses: list[str] = []
+    responses: list[tuple[str, str]] = []
     for agent_id in plan.agents:
         agent_name = agent_labels[agent_id]
         if agent_id == "banking":
             responses.append(
-                banking_agent(
-                    customer_id,
-                    message,
-                    db_path,
-                    requested_actions=plan.banking_actions,
+                (
+                    "Banking details",
+                    banking_agent(
+                        customer_id,
+                        message,
+                        db_path,
+                        requested_actions=plan.banking_actions,
+                    ),
                 )
             )
             _trace(trace, agent_name, "Read account and/or transaction data from SQLite.")
         elif agent_id == "fraud":
             result, risk_score, category = fraud_agent(message)
-            responses.append(result)
+            responses.append(("Fraud risk assessment", result))
             _trace(
                 trace,
                 agent_name,
                 f"Computed a deterministic simulated risk score ({category}, {risk_score}/100).",
             )
         elif agent_id == "loan":
-            responses.append(loan_agent(customer_id, message, db_path))
+            responses.append(
+                ("Loan eligibility and EMI", loan_agent(customer_id, message, db_path))
+            )
             _trace(trace, agent_name, "Checked the simulated customer profile and calculated EMI.")
 
     if not responses:
-        responses.append(
+        answer = (
             "I can help with account balances, recent transactions, simulated transaction "
             "risk, and loan eligibility with an estimated EMI. Try one of the example requests."
         )
+    elif len(responses) == 1:
+        answer = responses[0][1]
+    else:
+        answer = "\n\n".join(
+            f"### {section_title}\n\n{section_result}"
+            for section_title, section_result in responses
+        )
     _trace(trace, "Supervisor Agent", f"Combined {len(responses)} specialist result(s).")
     return AssistantResult(
-        answer="\n\n---\n\n".join(responses),
+        answer=answer,
         trace=trace,
         mode=mode,
         mode_detail=mode_detail,

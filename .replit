@@ -35,7 +35,7 @@ channel = "stable-25_05"
 
 [userenv.shared]
 BANKAI_LLM_PROVIDER = "custom"
-BANKAI_LLM_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
-BANKAI_LLM_MODEL = "gemini-3.8-flash"
+BANKAI_LLM_BASE_URL = "https://api.groq.com/openai/v1"
+BANKAI_LLM_MODEL = "openai/gpt-oss-20b"
 BANKAI_LLM_TIMEOUT_SECONDS = "30"
 

@@ -17,6 +17,46 @@ The first launch creates `bankai.db` in the project folder and seeds three demo
 customers. No API key, cloud database, or bank connection is required; without an
 LLM key the app uses its deterministic mock router.
 
+### Windows setup (PowerShell)
+
+Run these commands from the project folder. Python 3.10 or newer and the Python
+launcher (`py`) should be installed.
+
+```powershell
+py -3 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\streamlit.exe run app.py --server.port 5000
+```
+
+### Optional local Ollama on Windows
+
+Install Ollama for Windows, then open PowerShell in the project folder and
+download a local model:
+
+```powershell
+winget install --id Ollama.Ollama -e
+ollama pull llama3.2
+```
+
+Start the Ollama application if it is not already running. Then select its local
+OpenAI-compatible endpoint and launch BankAI:
+
+```powershell
+$env:BANKAI_LLM_PROVIDER = "ollama"
+$env:BANKAI_LLM_BASE_URL = "http://localhost:11434/v1"
+$env:BANKAI_LLM_MODEL = "llama3.2"
+.\.venv\Scripts\streamlit.exe run app.py --server.port 5000
+```
+
+Ollama defaults to `http://localhost:11434/v1` and does not need an API key. The
+application accepts the keyless Ollama provider only when its endpoint is a
+loopback address. Ollama uses a 60-second default timeout for local model
+startup. If Ollama is unavailable, returns invalid output, or its route conflicts
+with clear supported keywords, BankAI continues using deterministic local
+routing. The environment variables above apply to the current PowerShell window
+only.
+
 ## Optional live LLM intent routing
 
 The LLM is used only to interpret the question and return a structured list of
@@ -37,17 +77,19 @@ router and are labeled as `MOCK MODE` in the response.
 
 | Environment variable | Purpose | Default |
 | --- | --- | --- |
-| `BANKAI_LLM_API_KEY` | Secret provider key; enables live routing | Not set |
-| `BANKAI_LLM_PROVIDER` | `openai`, `openrouter`, or `custom` | `openai` |
-| `BANKAI_LLM_MODEL` | Provider model name | `gpt-4o-mini` for OpenAI |
-| `BANKAI_LLM_BASE_URL` | OpenAI-compatible API root; required for `custom` | Provider default |
-| `BANKAI_LLM_TIMEOUT_SECONDS` | Request timeout, from 1 to 60 seconds | `10` |
+| `BANKAI_LLM_API_KEY` | Secret provider key; required for remote providers | Not set; not required for local Ollama |
+| `BANKAI_LLM_PROVIDER` | `openai`, `openrouter`, `groq`, `custom`, or `ollama` | `openai` |
+| `BANKAI_LLM_MODEL` | Provider model name | Provider default (`llama3.2` for Ollama) |
+| `BANKAI_LLM_BASE_URL` | OpenAI-compatible API root; required for `custom` | Provider default (`http://localhost:11434/v1` for Ollama) |
+| `BANKAI_LLM_TIMEOUT_SECONDS` | Request timeout, from 1 to 60 seconds | `10` (`60` for Ollama) |
 
 OpenAI and OpenRouter use their standard API roots by default. For another
 OpenAI-compatible provider, set `BANKAI_LLM_PROVIDER=custom` and configure
 `BANKAI_LLM_BASE_URL` and `BANKAI_LLM_MODEL`. HTTPS is required, except for
-localhost endpoints. Each assistant response reports whether it used live LLM
-routing or mock routing.
+localhost endpoints. Keyless mode is limited to the local Ollama provider;
+OpenAI, OpenRouter, Groq, and custom remote providers still require an API key.
+Each assistant response reports whether it used live LLM routing or mock
+routing.
 
 ### Gemini on Replit
 
@@ -75,8 +117,9 @@ shows a safe 401 message without exposing the key and continues with mock mode;
 2. Ask: “Show my 5 most recent transactions.”
 3. Ask: “Is a $950 online purchase in Singapore suspicious?”
 4. Ask: “Would I qualify for a $25,000 loan over 36 months? Calculate the EMI.”
-5. Ask: “Check my balance, assess risk for a $2,400 online purchase, and estimate
-   EMI for a $30,000 loan over 48 months.” This routes to multiple specialist agents.
+5. Ask: “Check my balance; assess fraud risk for a $2,400 online purchase;
+  calculate eligibility and EMI for a $30,000 loan over 48 months.” This routes
+  to Banking, Fraud, and Loan agents in sequence and returns separate sections.
 
 Use the customer selector to try different simulated customer profiles. The
 execution trace records the supervisor and each specialist that actually ran.
@@ -89,15 +132,17 @@ python -m unittest discover -v
 
 These automated tests are offline: they use fake provider responses and cover
 intent routing, multi-agent execution, SQLite-backed balances/transactions,
-deterministic fraud and loan calculations, and fallback for invalid output,
-timeouts, authentication errors, unavailable models, and rate limits. They do
-not verify access to a live Gemini account; live verification requires using the
-configured Replit workflow and a real request.
+deterministic fraud and loan calculations, UI button/session behavior, and
+fallback for invalid output, timeouts, authentication errors, unavailable
+models, and rate limits. Run them with the active environment:
 
-For this workspace, the latest verification passed 16 automated tests and 6
-separate live Gemini checks: one minimal route plus balance, recent transactions,
-fraud risk, loan eligibility/EMI, and a multi-agent request. The live checks are
-not part of `unittest` and should be repeated after changing the key or model.
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -v
+```
+
+The automated suite mocks LLM responses. For a live local Ollama check, start
+Ollama, configure the provider as shown above, and exercise all five examples in
+the Streamlit app.
 
 ## How the demo works
 
@@ -111,7 +156,9 @@ not part of `unittest` and should be repeated after changing the key or model.
   monthly EMI using a fixed 11.5% annual rate.
 - `bankai/storage.py` owns the schema, fictional seed records, and read helpers.
 - `bankai/agents.py` contains routing, banking, fraud, and loan logic.
-- `app.py` provides the chat dashboard and five ready-to-run example requests.
+- `app.py` provides the Streamlit chat dashboard and five ready-to-run example
+  requests. In the Replit workspace, the web artifact routes its service to this
+  root Streamlit app; the tracked React files are part of that workspace setup.
 
 This project is an educational prototype. It does not provide financial advice,
 make real lending decisions, connect to a bank, or detect actual fraud.

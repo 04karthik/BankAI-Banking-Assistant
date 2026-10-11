@@ -54,11 +54,13 @@ with st.sidebar:
     st.markdown("- Loan Agent")
     if st.button("Clear conversation", use_container_width=True):
         st.session_state["messages"] = []
+        st.session_state["_handled_demo_requests"] = set()
         st.rerun()
 
 if st.session_state.get("_active_customer_id") != selected_customer_id:
     st.session_state["_active_customer_id"] = selected_customer_id
     st.session_state["messages"] = []
+    st.session_state["_handled_demo_requests"] = set()
 
 selected_customer = next(
     customer for customer in customers if customer["customer_id"] == selected_customer_id
@@ -87,8 +89,16 @@ st.markdown("**Try a use case**")
 use_case_columns = st.columns(len(demo_use_cases))
 
 
-def run_prompt(prompt: str) -> None:
+def run_prompt(prompt: str, demo_key: str | None = None) -> None:
+    handled_requests = None
+    if demo_key is not None:
+        handled_requests = st.session_state.setdefault("_handled_demo_requests", set())
+        if demo_key in handled_requests:
+            return
+
     result: AssistantResult = supervisor_agent(selected_customer_id, prompt)
+    if demo_key is not None and handled_requests is not None:
+        handled_requests.add(demo_key)
     st.session_state.setdefault("messages", []).extend(
         [
             {"role": "user", "content": prompt},
@@ -105,7 +115,7 @@ def run_prompt(prompt: str) -> None:
 
 for column, (label, prompt) in zip(use_case_columns, demo_use_cases):
     if column.button(label, use_container_width=True, key=f"demo_{label}"):
-        run_prompt(prompt)
+        run_prompt(prompt, demo_key=label)
         st.rerun()
 
 st.divider()

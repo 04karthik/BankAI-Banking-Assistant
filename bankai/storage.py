@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import date, timedelta
 from pathlib import Path
@@ -68,7 +68,7 @@ def connect(db_path: str | Path = DATABASE_PATH) -> sqlite3.Connection:
 @contextmanager
 def _managed_connection(
     db_path: str | Path = DATABASE_PATH,
-) -> Iterator[sqlite3.Connection]:
+) -> Generator[sqlite3.Connection, None, None]:
     """Commit or roll back a connection, then always close it."""
     connection = connect(db_path)
     try:
@@ -163,7 +163,7 @@ def initialize_database(db_path: str | Path = DATABASE_PATH) -> None:
                         posted_at.isoformat(),
                         merchant,
                         category,
-                        amount if customer_index == 0 or category != "Income" else amount * 0.85,
+                        customer["monthly_income"] if category == "Income" else amount,
                         location,
                         status,
                     ),
